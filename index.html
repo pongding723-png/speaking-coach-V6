@@ -1,0 +1,880 @@
+<!DOCTYPE html>
+<html lang="zh-TW">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0, maximum-scale=1.0, user-scalable=no">
+    <title>口說訓練 Pro</title>
+    <script src="https://cdn.tailwindcss.com"></script>
+    <link href="https://cdnjs.cloudflare.com/ajax/libs/font-awesome/6.4.0/css/all.min.css" rel="stylesheet">
+    <link href="https://fonts.googleapis.com/css2?family=Inter:wght@300;400;500;600;700&display=swap" rel="stylesheet">
+    
+    <style>
+        body {
+            font-family: 'Inter', sans-serif;
+            background-color: #8bbccf; /* LINE-like background color */
+            -webkit-tap-highlight-color: transparent;
+            /* 預設高度，後續由 JS visualViewport 動態接管以適應手機鍵盤 */
+            height: 100dvh;
+            width: 100vw;
+            margin: 0;
+            overflow: hidden;
+        }
+
+        /* 針對 iPhone 底部的安全區域 (Safe Area) 進行防護 */
+        .pb-safe {
+            padding-bottom: max(0.75rem, env(safe-area-inset-bottom));
+        }
+
+        /* Custom Scrollbar for Chat Area */
+        ::-webkit-scrollbar {
+            width: 6px;
+        }
+        ::-webkit-scrollbar-track {
+            background: transparent;
+        }
+        ::-webkit-scrollbar-thumb {
+            background: rgba(0, 0, 0, 0.15);
+            border-radius: 10px;
+        }
+
+        /* Chat Bubbles */
+        .bubble-user {
+            background-color: #85e04e; /* LINE green */
+            color: #111;
+            border-radius: 18px 4px 18px 18px;
+            box-shadow: 0 1px 2px rgba(0,0,0,0.1);
+        }
+        .bubble-ai {
+            background-color: #ffffff;
+            color: #111;
+            border-radius: 4px 18px 18px 18px;
+            box-shadow: 0 1px 2px rgba(0,0,0,0.1);
+        }
+
+        /* Tooltip for Tap-to-Listen */
+        #selection-tooltip {
+            display: none;
+            position: fixed;
+            z-index: 1000;
+            background-color: #1e293b; /* Slate 800 */
+            border-radius: 8px;
+            padding: 6px;
+            box-shadow: 0 4px 12px rgba(0,0,0,0.2);
+            transform: translateX(-50%);
+            animation: fadeIn 0.2s ease-out;
+        }
+        #selection-tooltip::after {
+            content: '';
+            position: absolute;
+            top: 100%;
+            left: 50%;
+            margin-left: -6px;
+            border-width: 6px;
+            border-style: solid;
+            border-color: #1e293b transparent transparent transparent;
+        }
+
+        @keyframes fadeIn {
+            from { opacity: 0; transform: translate(-50%, 10px); }
+            to { opacity: 1; transform: translate(-50%, 0); }
+        }
+
+        .typing-indicator span {
+            display: inline-block;
+            width: 6px;
+            height: 6px;
+            background-color: #9ca3af;
+            border-radius: 50%;
+            margin: 0 2px;
+            animation: bounce 1.4s infinite ease-in-out both;
+        }
+        .typing-indicator span:nth-child(1) { animation-delay: -0.32s; }
+        .typing-indicator span:nth-child(2) { animation-delay: -0.16s; }
+        @keyframes bounce {
+            0%, 80%, 100% { transform: scale(0); }
+            40% { transform: scale(1); }
+        }
+
+        /* Ensure smooth text selection */
+        .selectable-text {
+            user-select: text;
+            -webkit-user-select: text;
+        }
+    </style>
+</head>
+<body class="flex flex-col md:flex-row bg-[#8bbccf] text-slate-800">
+
+    <!-- 啟動畫面 (解決 iOS 無法自動播放音效與初始化問題) -->
+    <div id="start-screen" class="fixed inset-0 z-[100] bg-[#8bbccf] flex flex-col items-center justify-center transition-opacity duration-300">
+        <div class="bg-white p-8 rounded-2xl shadow-xl text-center max-w-sm w-11/12">
+            <div class="w-16 h-16 rounded-full bg-blue-100 flex items-center justify-center text-blue-500 mx-auto mb-4 text-3xl shadow-sm">
+                <i class="fa-solid fa-robot"></i>
+            </div>
+            <h1 class="text-2xl font-bold text-slate-800 mb-2">口說訓練 Pro</h1>
+            <p class="text-sm text-slate-500 mb-6">點擊下方按鈕以解鎖手機語音權限</p>
+            <button onclick="startApp()" class="w-full py-3 bg-green-500 hover:bg-green-600 text-white font-bold rounded-xl shadow-md transition transform active:scale-95">
+                開始練習
+            </button>
+        </div>
+    </div>
+
+    <!-- Mobile overlay -->
+    <div id="mobile-overlay" class="fixed inset-0 bg-black bg-opacity-50 z-40 hidden md:hidden" onclick="toggleSidebar()"></div>
+
+    <!-- Sidebar -->
+    <aside id="sidebar" class="fixed md:static inset-y-0 left-0 transform -translate-x-full md:translate-x-0 w-72 bg-white h-full shadow-2xl md:shadow-none z-50 transition-transform duration-300 flex flex-col">
+        <div class="p-5 border-b border-gray-100 flex justify-between items-center bg-white">
+            <h1 class="text-xl font-bold text-slate-800"><i class="fa-solid fa-language text-blue-500 mr-2"></i>口說訓練 Pro</h1>
+            <button class="md:hidden text-gray-500 hover:text-gray-800" onclick="toggleSidebar()">
+                <i class="fa-solid fa-times text-xl"></i>
+            </button>
+        </div>
+
+        <div class="flex-1 overflow-y-auto p-4 space-y-6">
+            <!-- Mode Selection -->
+            <div>
+                <h2 class="text-xs font-semibold text-gray-400 uppercase tracking-wider mb-3">練習模式</h2>
+                <div class="space-y-2">
+                    <button onclick="setMode('freetalk')" id="btn-mode-freetalk" class="w-full text-left px-4 py-3 rounded-xl bg-blue-50 text-blue-700 font-medium transition flex items-center">
+                        <div class="w-8 h-8 rounded-full bg-blue-100 flex items-center justify-center mr-3"><i class="fa-regular fa-comments"></i></div>
+                        自由閒聊
+                    </button>
+                    <button onclick="setMode('roleplay')" id="btn-mode-roleplay" class="w-full text-left px-4 py-3 rounded-xl hover:bg-gray-50 text-gray-700 font-medium transition flex items-center">
+                        <div class="w-8 h-8 rounded-full bg-orange-100 text-orange-600 flex items-center justify-center mr-3"><i class="fa-solid fa-user-tie"></i></div>
+                        職場情境模擬
+                    </button>
+                    <button onclick="setMode('chunking')" id="btn-mode-chunking" class="w-full text-left px-4 py-3 rounded-xl hover:bg-gray-50 text-gray-700 font-medium transition flex items-center">
+                        <div class="w-8 h-8 rounded-full bg-purple-100 text-purple-600 flex items-center justify-center mr-3"><i class="fa-solid fa-puzzle-piece"></i></div>
+                        語塊刻意練習
+                    </button>
+                </div>
+            </div>
+
+            <!-- Saved Chunks -->
+            <div>
+                <div class="flex justify-between items-center mb-3">
+                    <h2 class="text-xs font-semibold text-gray-400 uppercase tracking-wider">我的字詞庫</h2>
+                    <span class="text-xs bg-gray-100 text-gray-600 px-2 py-0.5 rounded-full" id="saved-count">0</span>
+                </div>
+                <div id="saved-chunks-list" class="space-y-2 max-h-48 overflow-y-auto">
+                    <!-- Dynamic saved chunks go here -->
+                    <p class="text-sm text-gray-400 italic px-2">尚未收藏任何語句</p>
+                </div>
+            </div>
+        </div>
+
+        <div class="p-4 border-t border-gray-100">
+            <button onclick="clearHistory()" class="w-full py-2 text-sm text-red-500 hover:bg-red-50 rounded-lg transition">
+                <i class="fa-solid fa-trash-can mr-2"></i>清除聊天紀錄
+            </button>
+        </div>
+    </aside>
+
+    <!-- Floating Selection Tooltip -->
+    <div id="selection-tooltip" class="flex items-center space-x-1">
+        <button onclick="speakSelected('en-US')" class="flex items-center px-3 py-1.5 rounded bg-slate-700 hover:bg-slate-600 text-white text-sm font-medium transition">
+            🇺🇸 美音
+        </button>
+        <div class="w-px h-5 bg-slate-600 mx-1"></div>
+        <button onclick="speakSelected('en-GB')" class="flex items-center px-3 py-1.5 rounded bg-slate-700 hover:bg-slate-600 text-white text-sm font-medium transition">
+            🇬🇧 英音
+        </button>
+    </div>
+
+    <!-- Main Chat Container -->
+    <main class="flex-1 flex flex-col h-full relative">
+        <!-- Header -->
+        <header class="bg-[#8bbccf]/90 backdrop-blur-sm z-10 p-3 flex items-center justify-between shadow-sm sticky top-0">
+            <div class="flex items-center">
+                <button class="md:hidden mr-3 w-10 h-10 flex items-center justify-center rounded-full hover:bg-black/10 text-slate-800 transition" onclick="toggleSidebar()">
+                    <i class="fa-solid fa-bars text-xl"></i>
+                </button>
+                <div class="flex items-center">
+                    <div id="header-avatar" class="w-10 h-10 rounded-full bg-white flex items-center justify-center text-blue-500 shadow-sm mr-3">
+                        <i class="fa-solid fa-robot text-xl"></i>
+                    </div>
+                    <div>
+                        <h2 id="header-title" class="font-bold text-slate-800 leading-tight">AI 英文導師</h2>
+                        <p id="header-subtitle" class="text-xs text-slate-600">自由閒聊模式</p>
+                    </div>
+                </div>
+            </div>
+            <div class="flex items-center space-x-2">
+                <button id="btn-auto-tts" onclick="toggleAutoTTS()" class="w-10 h-10 rounded-full flex items-center justify-center hover:bg-black/10 text-slate-700 transition" title="自動語音開關">
+                    <i id="icon-auto-tts" class="fa-solid fa-volume-high"></i>
+                </button>
+            </div>
+        </header>
+
+        <!-- Chat Area -->
+        <div id="chat-container" class="flex-1 overflow-y-auto p-4 space-y-6 pb-20">
+            <!-- Messages will be injected here -->
+        </div>
+
+        <!-- Input Area (Pinned to bottom) -->
+        <div class="bg-[#f0f0f0] border-t border-gray-300 p-3 pb-safe z-20">
+            <div class="max-w-4xl mx-auto flex items-end space-x-2">
+                
+                <!-- Input Box -->
+                <div class="flex-1 bg-white rounded-2xl flex items-center px-4 py-2 border border-gray-200 focus-within:border-green-400 focus-within:ring-2 focus-within:ring-green-100 transition shadow-sm">
+                    <textarea id="message-input" rows="1" class="w-full bg-transparent outline-none resize-none max-h-32 py-1 text-slate-800" placeholder="輸入訊息或使用語音..."></textarea>
+                </div>
+
+                <!-- Controls -->
+                <div class="flex items-center space-x-2 pb-1">
+                    <button id="btn-mic" onclick="toggleDictation()" class="w-10 h-10 rounded-full bg-white border border-gray-200 text-gray-500 hover:text-green-500 hover:border-green-300 shadow-sm flex items-center justify-center transition flex-shrink-0">
+                        <i id="icon-mic" class="fa-solid fa-microphone"></i>
+                    </button>
+                    <button id="btn-send" onclick="sendMessage()" class="w-10 h-10 rounded-full bg-green-500 hover:bg-green-600 text-white shadow-sm flex items-center justify-center transition flex-shrink-0 disabled:opacity-50 disabled:cursor-not-allowed">
+                        <i class="fa-solid fa-paper-plane"></i>
+                    </button>
+                </div>
+            </div>
+            <div id="recording-indicator" class="hidden text-center text-xs text-green-600 font-medium mt-2 animate-pulse">
+                <i class="fa-solid fa-circle text-[8px] mr-1"></i>正在聆聽... 請說話
+            </div>
+        </div>
+    </main>
+
+    <script>
+        // --- State Management ---
+        const state = {
+            chatHistory: [],
+            savedChunks: [],
+            currentMode: 'freetalk',
+            isRecording: false,
+            autoTTS: true,
+            selectedText: '',
+            isGenerating: false
+        };
+
+        // --- DOM Elements ---
+        const chatContainer = document.getElementById('chat-container');
+        const messageInput = document.getElementById('message-input');
+        const btnSend = document.getElementById('btn-send');
+        const selectionTooltip = document.getElementById('selection-tooltip');
+        
+        // --- API Config ---
+        const API_KEY = ""; // Canvas provides this securely
+        const API_URL = `https://generativelanguage.googleapis.com/v1beta/models/gemini-2.5-flash-preview-09-2025:generateContent?key=${API_KEY}`;
+
+        // --- Prompts per Mode ---
+        const PROMPTS = {
+            freetalk: `You are a friendly, native English speaking tutor. The user is practicing conversation. 
+1. Keep the chat natural, brief (1-3 sentences), and use "Plain Talk". 
+2. Analyze the user's message. If it has grammatical errors or awkward phrasing, provide a 'feedback' string showing the "Better way to say it" (wrap key chunk in **bold**).
+3. CRITICAL: If the user inputs Chinese, provide the most natural, native English translation for their Chinese input in the 'feedback' string. Reply to their message context in English in the 'reply' string.
+Strictly return JSON: {"reply": "...", "feedback": "..."}`,
+            
+            roleplay: `You are an AI playing a role in a workplace setting (e.g. an interviewer, a client, or a colleague). Start or continue the roleplay context. 
+1. Keep your replies professional but conversational.
+2. Analyze the user's message. If their workplace English can be more professional or natural, provide a 'feedback' string with a better alternative (highlight key phrase in **bold**).
+3. CRITICAL: If the user inputs Chinese, provide the most professional, native English translation for it in the 'feedback' string. Continue the roleplay in English in the 'reply' string.
+Strictly return JSON: {"reply": "...", "feedback": "..."}`,
+
+            chunking: `You are a drill instructor for English "Chunking" (語塊練習). 
+1. In your reply, throw out a complex idea or a specific scenario, and ask the user how they would say it in simple, direct English ("Plain Talk").
+2. When the user tries, evaluate their use of chunks. Provide 'feedback' showing the most native, chunk-based way to express it, highlighting the chunk in **bold**.
+3. CRITICAL: If the user inputs Chinese, translate their idea into a native English chunk in the 'feedback' string.
+Strictly return JSON: {"reply": "...", "feedback": "..."}`
+        };
+
+        // --- Initialization ---
+        window.onload = () => {
+            // 資料載入改由 startApp() 觸發，確保手機使用者有先點擊螢幕
+            
+            // 完美解決手機鍵盤彈出遮擋問題 (Visual Viewport API)
+            if (window.visualViewport) {
+                window.visualViewport.addEventListener('resize', () => {
+                    document.body.style.height = window.visualViewport.height + 'px';
+                    window.scrollTo(0, 0);
+                    scrollToBottom();
+                });
+            }
+            
+            // Auto resize textarea
+            messageInput.addEventListener('input', function() {
+                this.style.height = 'auto';
+                this.style.height = (this.scrollHeight < 128 ? this.scrollHeight : 128) + 'px';
+                if(this.value.trim() === '') this.style.height = 'auto';
+            });
+
+            // Enter to send (Shift+Enter for new line)
+            messageInput.addEventListener('keydown', function(e) {
+                if (e.key === 'Enter' && !e.shiftKey) {
+                    e.preventDefault();
+                    sendMessage();
+                }
+            });
+
+            // Setup Tap-to-Listen Selection
+            setupSelectionListener();
+        };
+
+        let audioUnlocked = false;
+
+        function startApp() {
+            // 隱藏啟動畫面
+            const startScreen = document.getElementById('start-screen');
+            startScreen.style.opacity = '0';
+            setTimeout(() => startScreen.style.display = 'none', 300);
+
+            // 解鎖 iOS 與手機版瀏覽器的語音播放限制
+            if (!audioUnlocked && 'speechSynthesis' in window) {
+                const unlockUtterance = new SpeechSynthesisUtterance('');
+                window.speechSynthesis.speak(unlockUtterance);
+                audioUnlocked = true;
+            }
+
+            loadLocalData();
+        }
+
+        function loadLocalData() {
+            const savedChat = localStorage.getItem('chatHistory_v1');
+            const savedChunks = localStorage.getItem('savedChunks_v1');
+            const savedMode = localStorage.getItem('currentMode_v1');
+
+            if (savedChunks) state.savedChunks = JSON.parse(savedChunks);
+            if (savedMode) setMode(savedMode, true);
+            
+            if (savedChat) {
+                state.chatHistory = JSON.parse(savedChat);
+                renderAllChats();
+            } else {
+                // Send welcome message if empty
+                triggerSystemGreeting();
+            }
+            renderSavedChunks();
+        }
+
+        function saveData() {
+            localStorage.setItem('chatHistory_v1', JSON.stringify(state.chatHistory));
+            localStorage.setItem('savedChunks_v1', JSON.stringify(state.savedChunks));
+            localStorage.setItem('currentMode_v1', state.currentMode);
+        }
+
+        function clearHistory() {
+            // Confirm modal replacement using custom UI or just do it. Let's make it direct since no alert.
+            state.chatHistory = [];
+            chatContainer.innerHTML = '';
+            localStorage.removeItem('chatHistory_v1');
+            triggerSystemGreeting();
+            toggleSidebar();
+        }
+
+        // --- UI Updates ---
+        function toggleSidebar() {
+            const sidebar = document.getElementById('sidebar');
+            const overlay = document.getElementById('mobile-overlay');
+            sidebar.classList.toggle('-translate-x-full');
+            overlay.classList.toggle('hidden');
+        }
+
+        function setMode(mode, silent = false) {
+            state.currentMode = mode;
+            
+            // Update UI buttons
+            ['freetalk', 'roleplay', 'chunking'].forEach(m => {
+                const btn = document.getElementById(`btn-mode-${m}`);
+                if (m === mode) {
+                    btn.classList.add('bg-blue-50', 'text-blue-700');
+                    btn.classList.remove('hover:bg-gray-50', 'text-gray-700');
+                } else {
+                    btn.classList.remove('bg-blue-50', 'text-blue-700');
+                    btn.classList.add('hover:bg-gray-50', 'text-gray-700');
+                }
+            });
+
+            // Update Header
+            const titles = { freetalk: '自由閒聊', roleplay: '職場情境', chunking: '語塊練習' };
+            const icons = { freetalk: 'fa-robot', roleplay: 'fa-user-tie', chunking: 'fa-puzzle-piece' };
+            document.getElementById('header-subtitle').innerText = `${titles[mode]}模式`;
+            document.getElementById('header-avatar').innerHTML = `<i class="fa-solid ${icons[mode]} text-xl"></i>`;
+
+            if (!silent) {
+                toggleSidebar();
+                triggerSystemGreeting();
+            }
+            saveData();
+        }
+
+        function toggleAutoTTS() {
+            state.autoTTS = !state.autoTTS;
+            const icon = document.getElementById('icon-auto-tts');
+            if(state.autoTTS) {
+                icon.classList.remove('fa-volume-xmark', 'text-gray-400');
+                icon.classList.add('fa-volume-high', 'text-slate-700');
+            } else {
+                icon.classList.remove('fa-volume-high', 'text-slate-700');
+                icon.classList.add('fa-volume-xmark', 'text-gray-400');
+            }
+        }
+
+        function renderAllChats() {
+            chatContainer.innerHTML = '';
+            state.chatHistory.forEach(msg => appendMessageUI(msg));
+            scrollToBottom();
+        }
+
+        function appendMessageUI(msg) {
+            const div = document.createElement('div');
+            div.className = `flex w-full ${msg.role === 'user' ? 'justify-end' : 'justify-start'}`;
+            
+            // Parse Markdown Bold to HTML
+            const formatText = (text) => text.replace(/\*\*(.*?)\*\*/g, '<strong class="font-bold text-blue-600">$1</strong>');
+
+            if (msg.role === 'user') {
+                div.innerHTML = `
+                    <div class="max-w-[80%] flex items-end">
+                        <div class="bubble-user p-3 selectable-text text-[15px] leading-relaxed">
+                            ${formatText(msg.content)}
+                        </div>
+                    </div>
+                `;
+            } else {
+                let feedbackHtml = '';
+                if (msg.feedback) {
+                    feedbackHtml = `
+                        <div class="mt-2 bg-blue-50 border border-blue-100 rounded-lg p-3 relative group">
+                            <div class="text-xs font-bold text-blue-400 uppercase mb-1 tracking-wider"><i class="fa-regular fa-lightbulb mr-1"></i>道地說法建議</div>
+                            <div class="text-sm text-slate-700 selectable-text">${formatText(msg.feedback)}</div>
+                            <button onclick="saveChunk(\`${msg.feedback.replace(/"/g, '&quot;')}\`)" class="absolute top-2 right-2 text-gray-300 hover:text-yellow-400 transition" title="收藏此語塊">
+                                <i class="fa-solid fa-star"></i>
+                            </button>
+                        </div>
+                    `;
+                }
+
+                div.innerHTML = `
+                    <div class="max-w-[85%] flex items-end">
+                        <div class="w-8 h-8 rounded-full bg-white shadow-sm flex items-center justify-center mr-2 flex-shrink-0 text-blue-500 text-sm">
+                            <i class="fa-solid fa-robot"></i>
+                        </div>
+                        <div class="flex flex-col items-start">
+                            <div class="bubble-ai p-3 selectable-text text-[15px] leading-relaxed relative group">
+                                ${formatText(msg.content)}
+                                <button onclick="speakText(\`${msg.content.replace(/"/g, '&quot;')}\`, 'en-US')" class="absolute -right-8 bottom-1 text-gray-400 hover:text-blue-500 opacity-0 group-hover:opacity-100 transition p-1">
+                                    <i class="fa-solid fa-play text-sm"></i>
+                                </button>
+                            </div>
+                            ${feedbackHtml}
+                        </div>
+                    </div>
+                `;
+            }
+            chatContainer.appendChild(div);
+            scrollToBottom();
+        }
+
+        function showTyping() {
+            const id = 'typing-indicator-bubble';
+            if (document.getElementById(id)) return;
+            
+            const div = document.createElement('div');
+            div.id = id;
+            div.className = `flex w-full justify-start`;
+            div.innerHTML = `
+                <div class="max-w-[85%] flex items-end">
+                    <div class="w-8 h-8 rounded-full bg-white shadow-sm flex items-center justify-center mr-2 flex-shrink-0 text-blue-500 text-sm">
+                        <i class="fa-solid fa-robot"></i>
+                    </div>
+                    <div class="bubble-ai p-4 typing-indicator flex items-center h-10">
+                        <span></span><span></span><span></span>
+                    </div>
+                </div>
+            `;
+            chatContainer.appendChild(div);
+            scrollToBottom();
+        }
+
+        function hideTyping() {
+            const el = document.getElementById('typing-indicator-bubble');
+            if(el) el.remove();
+        }
+
+        function scrollToBottom() {
+            setTimeout(() => {
+                chatContainer.scrollTo({ top: chatContainer.scrollHeight, behavior: 'smooth' });
+            }, 50);
+        }
+
+        async function sendMessage() {
+            if (state.isGenerating) return;
+            const text = messageInput.value.trim();
+            if (!text) return;
+
+            messageInput.value = '';
+            messageInput.style.height = 'auto'; // reset height
+
+            // Add user message
+            const userMsg = { role: 'user', content: text, timestamp: Date.now() };
+            state.chatHistory.push(userMsg);
+            appendMessageUI(userMsg);
+            saveData();
+
+            await fetchAIResponse();
+        }
+
+        async function fetchAIResponse() {
+            state.isGenerating = true;
+            showTyping();
+
+            // Construct conversation history for Gemini
+            // Only take last 10 messages to save context limit and keep it focused
+            const recentHistory = state.chatHistory.slice(-10).map(m => ({
+                role: m.role === 'user' ? 'user' : 'model',
+                parts: [{ text: m.role === 'user' ? m.content : JSON.stringify({reply: m.content, feedback: m.feedback}) }]
+            }));
+
+            const payload = {
+                contents: recentHistory,
+                systemInstruction: { parts: [{ text: PROMPTS[state.currentMode] }] },
+                generationConfig: {
+                    responseMimeType: "application/json",
+                    responseSchema: {
+                        type: "OBJECT",
+                        properties: {
+                            "reply": { "type": "STRING" },
+                            "feedback": { "type": "STRING", "nullable": true }
+                        },
+                        required: ["reply"]
+                    }
+                }
+            };
+
+            try {
+                let response = null;
+                let result = null;
+                const delays = [1000, 2000, 4000, 8000, 16000];
+                let attempt = 0;
+                let success = false;
+
+                // 指數退避重試機制 (Exponential Backoff)
+                while (attempt < 6 && !success) {
+                    try {
+                        response = await fetch(API_URL, {
+                            method: 'POST',
+                            headers: { 'Content-Type': 'application/json' },
+                            body: JSON.stringify(payload)
+                        });
+                        
+                        if (response.ok) {
+                            success = true;
+                            result = await response.json();
+                        } else {
+                            throw new Error(`HTTP error! status: ${response.status}`);
+                        }
+                    } catch (err) {
+                        if (attempt < 5) {
+                            await new Promise(resolve => setTimeout(resolve, delays[attempt]));
+                            attempt++;
+                        } else {
+                            throw err; // 所有重試皆失敗
+                        }
+                    }
+                }
+                
+                hideTyping();
+
+                if (result && result.candidates && result.candidates[0].content) {
+                    const jsonStr = result.candidates[0].content.parts[0].text;
+                    try {
+                        const parsed = JSON.parse(jsonStr);
+                        
+                        const aiMsg = { 
+                            role: 'ai', 
+                            content: parsed.reply, 
+                            feedback: parsed.feedback || null,
+                            timestamp: Date.now() 
+                        };
+                        
+                        state.chatHistory.push(aiMsg);
+                        appendMessageUI(aiMsg);
+                        saveData();
+
+                        // Auto Play TTS
+                        if(state.autoTTS) {
+                            speakText(parsed.reply, 'en-US');
+                        }
+                    } catch (e) {
+                        console.error("Failed to parse JSON response from Gemini", jsonStr);
+                    }
+                }
+            } catch (err) {
+                console.error(err);
+                hideTyping();
+                // Simple inline error fallback
+                const errorMsg = { role: 'ai', content: "Sorry, I'm having trouble connecting right now. Let's try again.", timestamp: Date.now() };
+                state.chatHistory.push(errorMsg);
+                appendMessageUI(errorMsg);
+            } finally {
+                state.isGenerating = false;
+            }
+        }
+
+        async function triggerSystemGreeting() {
+            // Push a hidden system prompt to start the conversation for the current mode
+            const roleplayScenarios = [
+                "Let's do a roleplay. I am your interviewer for a marketing position. Tell me about yourself.",
+                "Let's roleplay. I am a client who is upset because our project deadline was missed. How do you handle this?",
+                "Roleplay time! I am your coworker. I need you to help me with a presentation due tomorrow, but I know you are busy. I'll start: Hey, do you have a minute?",
+                "Let's do a roleplay. I am your manager, and we are having your annual performance review. How would you summarize your achievements this year?",
+                "Let's roleplay. We are at a networking event, and we just bumped into each other at the coffee station. I'll start: Hi there, the coffee here is pretty good, isn't it? I'm Alex."
+            ];
+
+            const chunkingScenarios = [
+                "Let's practice chunking. How would you say 'I am very busy and cannot do this right now' in a natural, polite way at work?",
+                "Let's practice! Give me a native, chunk-based way to say: 'I don't agree with your idea, but I respect your opinion.'",
+                "Chunking practice! How do you say 'Can you explain this again? I didn't understand what you just said' professionally?",
+                "Let's practice chunking. Express this idea naturally: 'Let's schedule a meeting for next Tuesday to discuss the budget.'",
+                "Chunking time! How would you politely say 'I think your plan has a big problem' in a business meeting without sounding rude?"
+            ];
+
+            const freetalkScenarios = [
+                "Hi! I am your AI English tutor. What would you like to talk about today?",
+                "Hello there! Any interesting topics you want to discuss today?",
+                "Hi! How was your day? Let's chat about anything you like in English."
+            ];
+
+            const triggers = {
+                freetalk: freetalkScenarios[Math.floor(Math.random() * freetalkScenarios.length)],
+                roleplay: roleplayScenarios[Math.floor(Math.random() * roleplayScenarios.length)],
+                chunking: chunkingScenarios[Math.floor(Math.random() * chunkingScenarios.length)]
+            };
+            
+            // clear history
+            state.chatHistory = [];
+            chatContainer.innerHTML = '';
+            
+            const startMsg = { role: 'ai', content: triggers[state.currentMode], feedback: null, timestamp: Date.now() };
+            state.chatHistory.push(startMsg);
+            appendMessageUI(startMsg);
+            saveData();
+            
+            if(state.autoTTS) speakText(startMsg.content, 'en-US');
+        }
+
+        let recognition = null;
+        function setupSpeechRecognition() {
+            if (!('webkitSpeechRecognition' in window) && !('SpeechRecognition' in window)) {
+                console.warn("Speech Recognition not supported in this browser.");
+                return;
+            }
+            
+            const SpeechRecognition = window.SpeechRecognition || window.webkitSpeechRecognition;
+            recognition = new SpeechRecognition();
+            recognition.continuous = false;
+            recognition.interimResults = true;
+            recognition.lang = 'en-US'; // Set to english for speaking practice
+
+            recognition.onstart = function() {
+                state.isRecording = true;
+                document.getElementById('icon-mic').classList.replace('fa-microphone', 'fa-stop');
+                document.getElementById('btn-mic').classList.add('bg-red-50', 'text-red-500', 'border-red-300');
+                document.getElementById('recording-indicator').classList.remove('hidden');
+                messageInput.placeholder = "Listening...";
+            };
+
+            recognition.onresult = function(event) {
+                let interimTranscript = '';
+                let finalTranscript = '';
+
+                for (let i = event.resultIndex; i < event.results.length; ++i) {
+                    if (event.results[i].isFinal) {
+                        finalTranscript += event.results[i][0].transcript;
+                    } else {
+                        interimTranscript += event.results[i][0].transcript;
+                    }
+                }
+                
+                // Show real-time dictation in the input box
+                if(finalTranscript || interimTranscript) {
+                    messageInput.value = finalTranscript + interimTranscript;
+                    messageInput.style.height = 'auto';
+                    messageInput.style.height = messageInput.scrollHeight + 'px';
+                }
+            };
+
+            recognition.onerror = function(event) {
+                console.error("Speech recognition error", event.error);
+                stopDictation();
+            };
+
+            recognition.onend = function() {
+                stopDictation();
+                // Optionally auto-send when recognition ends naturally:
+                // if(messageInput.value.trim() !== '') sendMessage();
+            };
+        }
+
+        function showTemporaryMessage(msg) {
+            const oldPh = messageInput.placeholder;
+            messageInput.placeholder = msg;
+            setTimeout(()=> messageInput.placeholder = oldPh, 4000);
+        }
+
+        function toggleDictation() {
+            // 檢查是否為安全連線 (手機版麥克風必須要在 HTTPS 才能啟動)
+            if (window.location.protocol !== 'https:' && window.location.hostname !== 'localhost') {
+                showTemporaryMessage("❗ 手機麥克風需在 HTTPS 加密環境下使用");
+                return;
+            }
+
+            if (!recognition) setupSpeechRecognition();
+            if (!recognition) {
+                showTemporaryMessage("❗ 您的瀏覽器不支援語音辨識功能");
+                return;
+            }
+
+            if (state.isRecording) {
+                recognition.stop();
+            } else {
+                messageInput.value = ''; // clear for new dictation
+                recognition.start();
+            }
+        }
+
+        function stopDictation() {
+            state.isRecording = false;
+            document.getElementById('icon-mic').classList.replace('fa-stop', 'fa-microphone');
+            document.getElementById('btn-mic').classList.remove('bg-red-50', 'text-red-500', 'border-red-300');
+            document.getElementById('recording-indicator').classList.add('hidden');
+            messageInput.placeholder = "輸入訊息或使用語音...";
+        }
+
+        function speakText(text, lang = 'en-US') {
+            if (!('speechSynthesis' in window)) return;
+            
+            // Clean text (remove markdown asterisks)
+            const cleanText = text.replace(/\*\*/g, '');
+
+            window.speechSynthesis.cancel(); // Stop current speech
+            const utterance = new SpeechSynthesisUtterance(cleanText);
+            utterance.lang = lang;
+            
+            // Optional: try to find a better voice based on lang
+            const voices = window.speechSynthesis.getVoices();
+            const preferredVoice = voices.find(v => v.lang === lang && (v.name.includes('Google') || v.name.includes('Natural')));
+            if(preferredVoice) utterance.voice = preferredVoice;
+
+            // Slow down slightly for educational purpose if selected
+            if (document.getElementById('selection-tooltip').style.display === 'flex') {
+                 utterance.rate = 0.85; // slightly slower for selected chunks
+            } else {
+                 utterance.rate = 1.0;
+            }
+
+            window.speechSynthesis.speak(utterance);
+        }
+
+        // Handle Text Selection for Tap-to-Listen
+        function setupSelectionListener() {
+            document.addEventListener('mouseup', handleSelection);
+            document.addEventListener('touchend', handleSelection);
+            
+            // Hide tooltip on scroll to prevent floating away
+            chatContainer.addEventListener('scroll', () => {
+                selectionTooltip.style.display = 'none';
+            });
+            
+            // Prevent hiding when clicking on tooltip buttons
+            selectionTooltip.addEventListener('mousedown', (e) => e.stopPropagation());
+            selectionTooltip.addEventListener('touchstart', (e) => e.stopPropagation());
+        }
+
+        function handleSelection(e) {
+            setTimeout(() => {
+                const selection = window.getSelection();
+                const text = selection.toString().trim();
+
+                if (text.length > 0 && !selectionTooltip.contains(e.target)) {
+                    // Make sure selection is inside chat container
+                    if(!chatContainer.contains(selection.anchorNode)) return;
+
+                    const range = selection.getRangeAt(0);
+                    const rect = range.getBoundingClientRect();
+                    
+                    state.selectedText = text;
+                    selectionTooltip.style.display = 'flex';
+                    
+                    // Position calculations (Fixed position relative to viewport)
+                    const tooltipWidth = selectionTooltip.offsetWidth || 150; 
+                    let topPos = rect.top - selectionTooltip.offsetHeight - 12;
+                    let leftPos = rect.left + (rect.width / 2);
+
+                    // Boundaries check
+                    if (topPos < 50) topPos = rect.bottom + 12; // Flip below if too high
+                    if (leftPos < tooltipWidth / 2) leftPos = tooltipWidth / 2 + 10;
+                    if (leftPos > window.innerWidth - tooltipWidth / 2) leftPos = window.innerWidth - tooltipWidth / 2 - 10;
+
+                    selectionTooltip.style.top = `${topPos}px`;
+                    selectionTooltip.style.left = `${leftPos}px`;
+
+                } else if (!selectionTooltip.contains(e.target)) {
+                    selectionTooltip.style.display = 'none';
+                }
+            }, 50); // slight delay to allow mobile selection UI to settle
+        }
+
+        function speakSelected(lang) {
+            if(state.selectedText) {
+                speakText(state.selectedText, lang);
+            }
+            // Keep tooltip open, but remove selection if desired. Let's keep selection.
+        }
+
+        function saveChunk(text) {
+            // Clean markdown
+            const cleanText = text.replace(/\*\*(.*?)\*\*/g, '$1');
+            
+            if(!state.savedChunks.includes(cleanText)) {
+                state.savedChunks.unshift(cleanText); // Add to top
+                saveData();
+                renderSavedChunks();
+                
+                // Visual feedback
+                const icon = event.currentTarget.querySelector('i');
+                icon.classList.remove('fa-regular', 'text-gray-300');
+                icon.classList.add('fa-solid', 'text-yellow-400', 'scale-125');
+                setTimeout(() => icon.classList.remove('scale-125'), 200);
+            }
+        }
+
+        function renderSavedChunks() {
+            const list = document.getElementById('saved-chunks-list');
+            document.getElementById('saved-count').innerText = state.savedChunks.length;
+            
+            if (state.savedChunks.length === 0) {
+                list.innerHTML = '<p class="text-sm text-gray-400 italic px-2">尚未收藏任何語句</p>';
+                return;
+            }
+
+            list.innerHTML = '';
+            state.savedChunks.forEach((chunk, index) => {
+                const div = document.createElement('div');
+                div.className = 'group flex justify-between items-start bg-gray-50 p-2 rounded border border-gray-100';
+                div.innerHTML = `
+                    <p class="text-sm text-gray-700 flex-1 pr-2">${chunk}</p>
+                    <div class="flex space-x-1 opacity-0 group-hover:opacity-100 transition-opacity">
+                        <button onclick="speakText('${chunk.replace(/'/g, "\\'")}', 'en-US')" class="text-blue-400 hover:text-blue-600 p-1"><i class="fa-solid fa-play"></i></button>
+                        <button onclick="removeChunk(${index})" class="text-red-300 hover:text-red-500 p-1"><i class="fa-solid fa-xmark"></i></button>
+                    </div>
+                `;
+                list.appendChild(div);
+            });
+        }
+
+        function removeChunk(index) {
+            state.savedChunks.splice(index, 1);
+            saveData();
+            renderSavedChunks();
+        }
+
+        // Ensure voices are loaded (Chrome sometimes needs a trigger)
+        window.speechSynthesis.onvoiceschanged = () => {
+             window.speechSynthesis.getVoices();
+        };
+
+    </script>
+</body>
+</html>
